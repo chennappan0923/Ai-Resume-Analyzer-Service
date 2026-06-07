@@ -1,0 +1,23 @@
+## Build folders
+[Bb]in/
+[Oo]bj/
+
+## Visual Studio
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+## OS files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+## User secrets / local configuration
+# You can uncomment the line below if you want to completely ignore appsettings.json
+# appsettings.json
+
+## Uploaded Files
+Uploads/
+
