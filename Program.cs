@@ -1,4 +1,5 @@
 using System.Text;
+using AI_Resume_Analyzer_API.Domain.Entities;
 using AI_Resume_Analyzer_API.Infrastructure.AI;
 using AI_Resume_Analyzer_API.Infrastructure.Database;
 using AI_Resume_Analyzer_API.Infrastructure.Middleware;
@@ -19,16 +20,47 @@ builder.Services.AddCors(options =>
 {
     options.AddPolicy("CorsPolicy", policy =>
     {
-        policy.WithOrigins("http://localhost:4200")
+        policy.WithOrigins("http://localhost:4200", "https://chennappan0923.github.io")
               .AllowAnyHeader()
               .AllowAnyMethod()
               .AllowCredentials();
     });
 });
 
-// Configure DbContext
-builder.Services.AddDbContext<ResumeAnalyzerDbContext>(options =>
-    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
+// Configure DbContext with fallback to InMemory database if SQL Server is offline or unconfigured
+var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
+bool useInMemory = string.IsNullOrWhiteSpace(connectionString) || 
+                   connectionString.Contains("YOUR_") ||
+                   connectionString.Equals("InMemory", StringComparison.OrdinalIgnoreCase);
+
+if (!useInMemory)
+{
+    try
+    {
+        // Quickly test if local SQL Server is running (timeout after 2 seconds)
+        var connBuilder = new Microsoft.Data.SqlClient.SqlConnectionStringBuilder(connectionString)
+        {
+            ConnectTimeout = 2
+        };
+        using var conn = new Microsoft.Data.SqlClient.SqlConnection(connBuilder.ConnectionString);
+        conn.Open();
+    }
+    catch
+    {
+        useInMemory = true;
+    }
+}
+
+if (useInMemory)
+{
+    builder.Services.AddDbContext<ResumeAnalyzerDbContext>(options =>
+        options.UseInMemoryDatabase("ResumeAnalyzerDb"));
+}
+else
+{
+    builder.Services.AddDbContext<ResumeAnalyzerDbContext>(options =>
+        options.UseSqlServer(connectionString));
+}
 
 // Configure JWT Authentication
 var jwtKey = builder.Configuration["Jwt:Secret"] ?? "SuperSecretKeyForResumeAnalyzerSolutionSecretKey123!";
@@ -123,6 +155,34 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
+
+// Ensure database is created and seed hardcoded user
+using (var scope = app.Services.CreateScope())
+{
+    var services = scope.ServiceProvider;
+    try
+    {
+        var context = services.GetRequiredService<ResumeAnalyzerDbContext>();
+        context.Database.EnsureCreated();
+
+        // Seed demo/admin user
+        if (!context.Users.Any(u => u.Email == "admin@example.com"))
+        {
+            context.Users.Add(new User
+            {
+                FullName = "Administrator",
+                Email = "admin@example.com",
+                PasswordHash = PasswordHasher.HashPassword("Admin123!")
+            });
+            context.SaveChanges();
+        }
+    }
+    catch (Exception ex)
+    {
+        var logger = services.GetRequiredService<ILogger<Program>>();
+        logger.LogError(ex, "An error occurred while initializing/seeding the database fallback.");
+    }
+}
 
 app.Run();
 
